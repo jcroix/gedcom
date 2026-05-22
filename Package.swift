@@ -59,6 +59,8 @@ let package = Package(
             dependencies: ["GedcomKit"],
             resources: [
                 .copy("Fixtures"),
+                // Third-party public GEDCOM files for the system tests (see SystemFixtures/README.md).
+                .copy("SystemFixtures"),
             ]
         ),
     ]

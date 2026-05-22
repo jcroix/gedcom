@@ -46,15 +46,20 @@ public enum GedcomLexer {
         var diagnostics: [Diagnostic] = []
         var lineNumber = 0
 
-        // Split on '\n' WITHOUT collapsing empties, so every physical line keeps its true
-        // 1-based number even when we skip it. (CRLF files are handled by stripping a trailing
-        // '\r' per line below.)
-        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            lineNumber += 1
-            var content = rawLine
-            if content.hasSuffix("\r") { content = content.dropLast() }
+        // Normalize all three line-ending styles to '\n' FIRST. This matters for a subtle reason:
+        // in Swift "\r\n" is a SINGLE extended grapheme cluster, so `split(separator: "\n")` would
+        // not split a CRLF at all (the '\n' is glued to the '\r'); and a lone-CR "classic Mac" file
+        // (which the GEDCOM 5.5 torture test deliberately uses) has no '\n' to split on. Replacing
+        // CRLF then lone CR with LF makes the subsequent split correct for every style.
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
 
-            if let line = parseLine(content, number: lineNumber, into: &diagnostics) {
+        // Split WITHOUT collapsing empties, so every physical line keeps its true 1-based number
+        // even when we skip it (blank lines, malformed lines).
+        for rawLine in normalized.split(separator: "\n", omittingEmptySubsequences: false) {
+            lineNumber += 1
+            if let line = parseLine(rawLine, number: lineNumber, into: &diagnostics) {
                 lines.append(line)
             }
         }

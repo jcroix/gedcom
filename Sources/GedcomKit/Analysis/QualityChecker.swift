@@ -132,16 +132,20 @@ public enum QualityChecker {
     /// brokenReference: a relationship pointer that names a record which doesn't exist. Checks both
     /// family→person (HUSB/WIFE/CHIL) and person→family (FAMC/FAMS) directions.
     static func brokenReference(_ document: GedcomDocument) -> [Issue] {
+        // `@VOID@` (GEDCOM 7.0) is a deliberate "points to nothing" placeholder, not a broken link.
+        let voidPointer = Xref("@VOID@")
         var issues: [Issue] = []
         for family in document.allFamilies {
-            for personID in family.spouses + family.children where document.individuals[personID] == nil {
+            for personID in family.spouses + family.children
+            where personID != voidPointer && document.individuals[personID] == nil {
                 issues.append(Issue(category: .brokenReference, severity: .error,
                     message: "Family \(family.id) references individual \(personID), which does not exist.",
                     individuals: [], sourceLineRange: family.node.sourceLineRange))
             }
         }
         for person in document.allIndividuals {
-            for familyID in person.childInFamilies + person.spouseInFamilies where document.families[familyID] == nil {
+            for familyID in person.childInFamilies + person.spouseInFamilies
+            where familyID != voidPointer && document.families[familyID] == nil {
                 issues.append(Issue(category: .brokenReference, severity: .error,
                     message: "\(person.displayName) references family \(familyID), which does not exist.",
                     individuals: [person.id], sourceLineRange: person.node.sourceLineRange))

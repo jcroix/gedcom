@@ -89,6 +89,20 @@ final class LexerTests: XCTestCase {
         XCTAssertEqual(result.diagnostics.first?.lineNumber, 2)
     }
 
+    /// GEDCOM files use any of three line endings: LF (Unix), CRLF (Windows), and lone CR (classic
+    /// Mac — the GEDCOM 5.5 torture test deliberately uses these). All three must tokenize into the
+    /// same lines with the same 1-based numbers; a CRLF counts as ONE line ending, not two.
+    func testHandlesLFCRLFAndCROnlyLineEndings() {
+        let expected = [
+            GedcomLine(level: 0, tag: "HEAD", value: nil, lineNumber: 1),
+            GedcomLine(level: 1, tag: "CHAR", value: "UTF-8", lineNumber: 2),
+            GedcomLine(level: 0, tag: "TRLR", value: nil, lineNumber: 3),
+        ]
+        XCTAssertEqual(GedcomLexer.lex("0 HEAD\n1 CHAR UTF-8\n0 TRLR").lines, expected, "LF")
+        XCTAssertEqual(GedcomLexer.lex("0 HEAD\r\n1 CHAR UTF-8\r\n0 TRLR").lines, expected, "CRLF")
+        XCTAssertEqual(GedcomLexer.lex("0 HEAD\r1 CHAR UTF-8\r0 TRLR").lines, expected, "CR-only (classic Mac)")
+    }
+
     /// CONT (a hard line break) and CONC (a no-separator continuation) lines are tokenized like
     /// any other line — tag = CONT/CONC, value = the continued text. The lexer does NOT join them
     /// into the parent value; that assembly happens in model projection (E3), where the parent

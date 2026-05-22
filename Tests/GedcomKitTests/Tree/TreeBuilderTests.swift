@@ -103,6 +103,18 @@ final class TreeBuilderTests: XCTestCase {
         XCTAssertEqual(errors.first?.message.contains("@I001@"), true)
     }
 
+    /// `@VOID@` is a valid GEDCOM 7.0 placeholder pointer meaning "intentionally nothing" — it must
+    /// NOT be reported as a dangling reference even though no record defines it.
+    func testVoidPointerIsNotADanglingReference() {
+        let (_, diagnostics) = buildTree("""
+        0 @F1@ FAM
+        1 HUSB @VOID@
+        1 CHIL @VOID@
+        """)
+        XCTAssertEqual(diagnostics.filter { $0.severity == .error }, [],
+                       "@VOID@ is a deliberate GEDCOM 7.0 placeholder, not a broken reference.")
+    }
+
     /// A pointer value (here FAMC) that references a record no one defines is a dangling reference:
     /// exactly one error diagnostic, and the rest of the tree is intact.
     func testDanglingPointerYieldsOneError() throws {

@@ -102,8 +102,10 @@ public enum GedcomTreeBuilder {
         }
     }
 
-    /// True if a value is a cross-reference pointer like `@I001@` (so it should resolve to a record).
+    /// True if a value is a cross-reference pointer that is EXPECTED to resolve to a record, i.e.
+    /// `@something@` — but NOT the special GEDCOM 7.0 `@VOID@` placeholder, which deliberately
+    /// points to nothing and must never be reported as dangling.
     private static func looksLikePointer(_ value: String) -> Bool {
-        value.count >= 3 && value.hasPrefix("@") && value.hasSuffix("@")
+        value.count >= 3 && value.hasPrefix("@") && value.hasSuffix("@") && value != "@VOID@"
     }
 }
