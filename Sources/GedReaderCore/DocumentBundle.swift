@@ -12,20 +12,26 @@
 import Foundation
 import GedcomKit
 
-/// The result of loading a GEDCOM file: the parsed document plus its relationship index.
+/// The result of loading a GEDCOM file: the parsed document, its relationship index, and the
+/// data-quality issues — all computed up front (off-main) so the UI never blocks recomputing them.
 public struct DocumentBundle: Sendable {
     public let document: GedcomDocument
     public let index: RelationshipIndex
+    public let issues: [Issue]
 
-    public init(document: GedcomDocument, index: RelationshipIndex) {
+    public init(document: GedcomDocument, index: RelationshipIndex, issues: [Issue]) {
         self.document = document
         self.index = index
+        self.issues = issues
     }
 
-    /// Parse `data` and build the relationship index. Pure and side-effect-free, so it's safe to
-    /// run on a background task. Never throws — the engine degrades malformed input into diagnostics.
+    /// Parse `data`, build the relationship index, and run the quality checker. Pure and
+    /// side-effect-free, so it's safe to run on a background task. Never throws — the engine
+    /// degrades malformed input into diagnostics.
     public static func build(from data: Data) -> DocumentBundle {
         let document = GedcomDocument.load(data)
-        return DocumentBundle(document: document, index: RelationshipIndex.build(from: document))
+        let index = RelationshipIndex.build(from: document)
+        let issues = QualityChecker.issues(for: document, index: index)
+        return DocumentBundle(document: document, index: index, issues: issues)
     }
 }

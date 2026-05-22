@@ -55,6 +55,12 @@ public final class DocumentModel {
         return nil
     }
 
+    /// The precomputed data-quality issues, or [] unless loaded.
+    public var issues: [Issue] {
+        if case .loaded(let bundle) = state { return bundle.issues }
+        return []
+    }
+
     /// A short summary line for the loaded file, e.g. "2,000 people · 594 families".
     public var summary: String? {
         guard let document else { return nil }

@@ -24,7 +24,7 @@ struct RootView: View {
             case .loading:
                 ProgressView("Parsing…").controlSize(.large)
             case .loaded:
-                loadedSummaryView          // placeholder until the A1 shell replaces it
+                ShellView(model: model)    // 3-column browse UI (A1+)
             case .failed(let message):
                 failureView(message)
             }
@@ -33,6 +33,13 @@ struct RootView: View {
         // The File ▸ Open menu command broadcasts; the visible window responds by opening a panel.
         .onReceive(NotificationCenter.default.publisher(for: .openGedcomRequested)) { _ in
             presentOpenPanel()
+        }
+        // Headless smoke-test hook: if GEDREADER_AUTOLOAD names a file, open it on launch. Lets a
+        // script verify the UI renders a real file without crashing (no effect in normal use).
+        .task {
+            if let path = ProcessInfo.processInfo.environment["GEDREADER_AUTOLOAD"] {
+                await model.loadFile(at: URL(fileURLWithPath: path))
+            }
         }
     }
 
@@ -47,16 +54,6 @@ struct RootView: View {
             Button("Open GEDCOM…") { presentOpenPanel() }
                 .keyboardShortcut("o", modifiers: .command)
                 .controlSize(.large)
-        }
-        .padding(40)
-    }
-
-    private var loadedSummaryView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "checkmark.circle").font(.system(size: 40)).foregroundStyle(.green)
-            Text(model.summary ?? "").font(.title2)        // e.g. "2,000 people · 594 families"
-            Text("(Browsing UI arrives in the next milestone.)").foregroundStyle(.secondary)
-            Button("Open a different file…") { presentOpenPanel() }
         }
         .padding(40)
     }
