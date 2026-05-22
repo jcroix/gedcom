@@ -1,0 +1,15 @@
+# Swift Package Manager build products and resolved-dependency state.
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode (the App/ project, added later) — derived data, user state, build output.
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+xcuserdata/
+*.xcuserstate
+
+# macOS noise.
+.DS_Store
