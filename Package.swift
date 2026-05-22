@@ -36,9 +36,10 @@ let package = Package(
         .iOS(.v16),
     ],
 
-    // The single public library other code (the app, future tools) links against.
+    // Public libraries other code (the app, future tools) links against.
     products: [
         .library(name: "GedcomKit", targets: ["GedcomKit"]),
+        .library(name: "GedReaderCore", targets: ["GedReaderCore"]),
     ],
 
     targets: [
@@ -48,6 +49,17 @@ let package = Package(
         // subdirectory, so the folders are purely for human organization.
         .target(
             name: "GedcomKit"
+        ),
+
+        // The app's TESTABLE logic layer: DocumentModel (@Observable @MainActor), navigation
+        // history, person-row building, search index, chart layout. It depends on the engine and
+        // uses Foundation + Observation, but — like the engine — NEVER imports SwiftUI/AppKit, so
+        // it can be unit-tested headlessly with `swift test`. The Xcode app target holds only thin
+        // SwiftUI views on top of this. (Observation's @Observable needs macOS 14, so the few types
+        // that use it are annotated @available(macOS 14, *); the package minimum stays at 13.)
+        .target(
+            name: "GedReaderCore",
+            dependencies: ["GedcomKit"]
         ),
 
         // The engine's test suite. Depends on the engine and bundles the GEDCOM test fixtures
@@ -62,6 +74,14 @@ let package = Package(
                 // Third-party public GEDCOM files for the system tests (see SystemFixtures/README.md).
                 .copy("SystemFixtures"),
             ]
+        ),
+
+        // Tests for the app's logic layer. To exercise DocumentModel against the real family.ged
+        // without duplicating the 400KB fixture, these tests locate it on disk via #filePath
+        // (SPM resources can't reference another target's folder), so no resources rule is needed.
+        .testTarget(
+            name: "GedReaderCoreTests",
+            dependencies: ["GedReaderCore", "GedcomKit"]
         ),
     ]
 )
