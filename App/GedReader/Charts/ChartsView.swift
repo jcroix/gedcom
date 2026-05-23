@@ -20,7 +20,8 @@ struct ChartsView: View {
     }
 
     @State private var kind: Kind = .pedigree
-    @State private var generations = 4
+    // Shared with Settings (⌘,) and persisted across launches.
+    @AppStorage("chartGenerations") private var generations = 4
     @State private var scale: CGFloat = 1
 
     /// Chart root: explicit Home, else current focus, else the first person in the file.

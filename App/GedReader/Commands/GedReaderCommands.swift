@@ -25,12 +25,33 @@ extension FocusedValues {
 
 struct GedReaderCommands: Commands {
     @FocusedValue(\.documentModel) private var model: DocumentModel?
+    let recents: RecentsStore
 
     var body: some Commands {
-        // Replace "New" with "Open…" — v1 has nothing to create, only files to open.
-        CommandGroup(replacing: .newItem) {
+        // Keep the default "New Window" (⌘N) and add Open / Open Recent after it.
+        CommandGroup(after: .newItem) {
             Button("Open…") { NotificationCenter.default.post(name: .openGedcomRequested, object: nil) }
                 .keyboardShortcut("o", modifiers: .command)
+
+            Menu("Open Recent") {
+                ForEach(recents.recents.paths, id: \.self) { path in
+                    Button((path as NSString).lastPathComponent) {
+                        NotificationCenter.default.post(name: .openGedcomPath, object: path)
+                    }
+                }
+                if !recents.recents.paths.isEmpty {
+                    Divider()
+                    Button("Clear Menu") { recents.clear() }
+                }
+            }
+            .disabled(recents.recents.paths.isEmpty)
+        }
+
+        // Find (best-effort ⌘F): focuses the People search field.
+        CommandGroup(after: .textEditing) {
+            Button("Find Person…") { NotificationCenter.default.post(name: .focusSearchRequested, object: nil) }
+                .keyboardShortcut("f", modifiers: .command)
+                .disabled(model == nil)
         }
 
         // Browser-style navigation.

@@ -1,10 +1,10 @@
 //
-// RootView.swift — the window's top-level view: drives the open → parse → show lifecycle (A0).
+// RootView.swift — the window's top-level view: open → parse → show, plus state restoration (A0, A9).
 //
-// It renders one of four states from the DocumentModel: idle (welcome + Open), loading (progress),
-// loaded (for now, the summary line — the 3-column shell arrives in A1), and failed (error + retry).
-// File opening uses an NSOpenPanel (we're a windowed app, not a DocumentGroup); parsing runs
-// off-main inside model.loadFile, so the UI stays responsive and shows progress.
+// Renders the DocumentModel's state (idle / loading / loaded shell / failed). Opening uses an
+// NSOpenPanel; parsing runs off-main in model.loadFile. On a successful open it records the file in
+// Open Recent and remembers it (plus the section and home person) in @SceneStorage so a relaunch
+// reopens the same file/section/home. Menu commands reach this window via broadcast notifications.
 //
 
 import SwiftUI
@@ -16,45 +16,90 @@ import GedcomKit
 
 struct RootView: View {
     @State private var model = DocumentModel()
+    @Environment(RecentsStore.self) private var recents
+
+    // Per-scene restoration: remembered across relaunch by SwiftUI's state restoration.
+    @SceneStorage("lastFilePath") private var lastFilePath = ""
+    @SceneStorage("lastSection") private var lastSectionRaw = SidebarSection.people.rawValue
+    @SceneStorage("lastHome") private var lastHome = ""
 
     var body: some View {
         Group {
             switch model.state {
-            case .idle:
-                welcomeView
-            case .loading:
-                ProgressView("Parsing…").controlSize(.large)
-            case .loaded:
-                ShellView(model: model)    // 3-column browse UI (A1+)
-            case .failed(let message):
-                failureView(message)
+            case .idle:    welcomeView
+            case .loading: ProgressView("Parsing…").controlSize(.large)
+            case .loaded:  ShellView(model: model)
+            case .failed(let message): failureView(message)
             }
         }
         .frame(minWidth: 720, minHeight: 480)
-        // Publish this window's model so app-level menu commands act on the focused window.
         .focusedSceneValue(\.documentModel, model)
-        // The File ▸ Open menu command broadcasts; the visible window responds by opening a panel.
-        .onReceive(NotificationCenter.default.publisher(for: .openGedcomRequested)) { _ in
-            presentOpenPanel()
+        .onReceive(NotificationCenter.default.publisher(for: .openGedcomRequested)) { _ in presentOpenPanel() }
+        .onReceive(NotificationCenter.default.publisher(for: .openGedcomPath)) { note in
+            if let path = note.object as? String { open(URL(fileURLWithPath: path), restore: false) }
         }
-        // Headless smoke-test hook (no effect in normal use): GEDREADER_AUTOLOAD opens a file on
-        // launch; optional GEDREADER_AUTOHOME (an xref) sets the chart root; GEDREADER_AUTOSECTION
-        // jumps to a section. Lets a script verify each section renders a real file without crashing.
-        .task {
-            let env = ProcessInfo.processInfo.environment
-            guard let path = env["GEDREADER_AUTOLOAD"] else { return }
-            await model.loadFile(at: URL(fileURLWithPath: path))
-            if let home = env["GEDREADER_AUTOHOME"] {
-                model.navigate(to: Xref(home))
-                model.setHomeToFocus()
-            }
-            if let raw = env["GEDREADER_AUTOSECTION"], let section = SidebarSection(rawValue: raw) {
-                model.currentSection = section
+        .onReceive(NotificationCenter.default.publisher(for: .focusSearchRequested)) { _ in
+            model.currentSection = .people     // best-effort: surface the search field
+        }
+        // Persist section / home so they're restored next launch.
+        .onChange(of: model.currentSection) { _, new in lastSectionRaw = new.rawValue }
+        .onChange(of: model.homePerson) { _, new in lastHome = new?.value ?? "" }
+        .task { await launch() }
+    }
+
+    // MARK: Launch (autoload hook or state restoration)
+
+    private func launch() async {
+        // Headless smoke-test hook (no effect in normal use): GEDREADER_AUTOLOAD opens a file;
+        // optional GEDREADER_AUTOHOME (xref) sets the chart root; GEDREADER_AUTOSECTION jumps section.
+        let env = ProcessInfo.processInfo.environment
+        if let path = env["GEDREADER_AUTOLOAD"] {
+            await loadAndRecord(URL(fileURLWithPath: path))
+            if let home = env["GEDREADER_AUTOHOME"] { model.navigate(to: Xref(home)); model.setHomeToFocus() }
+            if let raw = env["GEDREADER_AUTOSECTION"], let s = SidebarSection(rawValue: raw) { model.currentSection = s }
+            return
+        }
+        // Otherwise restore the last opened file (and its section/home) if it still exists.
+        if case .idle = model.state, !lastFilePath.isEmpty,
+           FileManager.default.fileExists(atPath: lastFilePath) {
+            open(URL(fileURLWithPath: lastFilePath), restore: true)
+        }
+    }
+
+    // MARK: Opening
+
+    private func presentOpenPanel() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        if let ged = UTType(filenameExtension: "ged") { panel.allowedContentTypes = [ged] }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        open(url, restore: false)
+    }
+
+    /// Open `url`. When `restore` is true, also reapply the remembered section/home (used on launch).
+    private func open(_ url: URL, restore: Bool) {
+        Task {
+            await loadAndRecord(url)
+            guard case .loaded = model.state else { return }
+            if restore {
+                if let section = SidebarSection(rawValue: lastSectionRaw) { model.currentSection = section }
+                if !lastHome.isEmpty { model.navigate(to: Xref(lastHome)); model.setHomeToFocus() }
+            } else {
+                model.currentSection = .people     // a freshly opened file starts at People
             }
         }
     }
 
-    // MARK: States
+    private func loadAndRecord(_ url: URL) async {
+        await model.loadFile(at: url)
+        if case .loaded = model.state {
+            recents.record(url.path)
+            lastFilePath = url.path
+        }
+    }
+
+    // MARK: Idle / failure views
 
     private var welcomeView: some View {
         VStack(spacing: 16) {
@@ -77,19 +122,5 @@ struct RootView: View {
             Button("Try another file…") { presentOpenPanel() }
         }
         .padding(40)
-    }
-
-    // MARK: Opening
-
-    private func presentOpenPanel() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        // Filter to .ged when the system knows that type; otherwise allow any file.
-        if let ged = UTType(filenameExtension: "ged") {
-            panel.allowedContentTypes = [ged]
-        }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await model.loadFile(at: url) }
     }
 }
