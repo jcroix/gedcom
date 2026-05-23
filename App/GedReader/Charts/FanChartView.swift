@@ -1,19 +1,19 @@
 //
 // FanChartView.swift — a fan ancestor chart, FamilySearch-styled (A8).
 //
-// Design choices (from user feedback comparing to FamilySearch):
-//   * WHITE background, dark text — most readable.
-//   * Tasteful lineage COLOR, always on: each of the four grandparent branches gets a refined hue
-//     (a muted Tableau-style palette, not FamilySearch's cyan/olive/yellow). It's applied as a SUBTLE
-//     wedge tint plus a bold colored OUTER-RING arc — visible but never fighting the text.
-//   * MULTI-LINE names: each label is a real SwiftUI Text in a wedge-sized frame, so it wraps (and
-//     shrinks) to fit instead of overflowing the edges. A small birth–death line is added when known.
-//   * Rotation by ring: inner rings (≤ radialMaxGeneration) read RADIALLY (along the spoke), outer
-//     rings read TANGENTIALLY (along the arc) — matching FamilySearch's great-grandparents-and-out.
+// Layout (matches FamilySearch, per user feedback):
+//   * WHITE background, dark text.
+//   * Tasteful lineage color (refined 4-color palette) as a subtle wedge tint + a bold colored
+//     OUTER-RING arc. Center person in neutral slate.
+//   * INNER rings (generations 1…radialMaxGeneration): names are RADIAL — straight, multi-line
+//     SwiftUI Text that wraps to fit the wedge (so long names don't overflow). Read outward; on the
+//     left half they flip to stay upright (the unavoidable mirror of any fan's radial text).
+//   * OUTER rings (beyond radialMaxGeneration): names are TANGENTIAL and CURVED — drawn glyph-by-
+//     glyph along the arc (rotated tangent), the way FamilySearch curves great-grandparents and out.
 //
-// Rendering is hybrid: a Canvas strokes the wedge outlines (and optional colored arcs); the names are
-// positioned/rotated SwiftUI views on top (free wrapping + layout). Whole-wedge taps are handled by a
-// polar hit-test. The fan is a half-fan (sweep π): root at bottom-center, ancestors sweeping the top.
+// Rendering is hybrid: a Canvas draws the wedge fills/outlines/arcs AND the curved outer names; the
+// radial inner names are positioned/rotated SwiftUI Text on top (free wrapping). Whole-wedge taps use
+// a polar hit-test. The fan is a half-fan (sweep π): root at bottom-center, ancestors sweeping the top.
 //
 
 import SwiftUI
@@ -24,8 +24,8 @@ struct FanChartView: View {
     let layout: FanLayout
     let model: DocumentModel
 
-    private let ringWidth: CGFloat = 96
-    private let radialMaxGeneration = 2          // gens 1–2 radial; 3+ tangential
+    private let ringWidth: CGFloat = 100
+    private let radialMaxGeneration = 3          // gens 1–3 radial; 4+ tangential/curved
     private let lineageBuckets = 4
 
     private var radius: CGFloat { CGFloat(layout.generations) * ringWidth }
@@ -33,11 +33,19 @@ struct FanChartView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Color.white                                   // readable light background
-            outlines
-            ForEach(layout.wedges) { wedge in
-                label(for: wedge)
-                    .allowsHitTesting(false)              // taps fall through to the wedge hit-test
+            Color.white
+            // Wedge geometry + colored arcs + the CURVED outer-ring names, all in one Canvas.
+            Canvas { context, _ in
+                for wedge in layout.wedges {
+                    drawWedge(wedge, in: &context)
+                    if wedge.generation > radialMaxGeneration {
+                        drawCurvedNames(wedge, in: &context)
+                    }
+                }
+            }
+            // Radial inner names (and the root) as wrapping SwiftUI Text overlays.
+            ForEach(layout.wedges.filter { $0.generation <= radialMaxGeneration }) { wedge in
+                radialLabel(wedge).allowsHitTesting(false)
             }
         }
         .frame(width: radius * 2, height: radius)
@@ -45,67 +53,84 @@ struct FanChartView: View {
         .gesture(SpatialTapGesture().onEnded { hitTest($0.location) })
     }
 
-    // MARK: Wedge outlines (+ optional colored outer-ring arcs)
+    // MARK: Wedge fill / outline / colored arc
 
-    private var outlines: some View {
-        Canvas { context, _ in
-            for wedge in layout.wedges {
-                let inner = CGFloat(wedge.generation) * ringWidth
-                let outer = inner + ringWidth
-                let sector = sectorPath(inner: inner, outer: outer, wedge: wedge)
-                let color = lineageColor(wedge)
+    private func drawWedge(_ wedge: FanWedge, in context: inout GraphicsContext) {
+        let inner = CGFloat(wedge.generation) * ringWidth
+        let outer = inner + ringWidth
+        let color = lineageColor(wedge)
 
-                // Subtle lineage tint, light separators, and a bold colored arc on the outer edge.
-                context.fill(sector, with: .color(color.opacity(0.16)))
-                context.stroke(sector, with: .color(Color(white: 0.80)), lineWidth: 1)
+        var sector = Path()
+        let start = Angle.radians(wedge.startAngle), end = Angle.radians(wedge.endAngle)
+        sector.addArc(center: center, radius: outer, startAngle: start, endAngle: end, clockwise: false)
+        sector.addArc(center: center, radius: max(inner, 0.01), startAngle: end, endAngle: start, clockwise: true)
+        sector.closeSubpath()
 
-                if wedge.generation > 0 {
-                    var arc = Path()
-                    arc.addArc(center: center, radius: outer - 1.5,
-                               startAngle: .radians(wedge.startAngle), endAngle: .radians(wedge.endAngle),
-                               clockwise: false)
-                    context.stroke(arc, with: .color(color), lineWidth: 3)
-                }
-            }
+        context.fill(sector, with: .color(color.opacity(0.16)))
+        context.stroke(sector, with: .color(Color(white: 0.80)), lineWidth: 1)
+        if wedge.generation > 0 {
+            var arc = Path()
+            arc.addArc(center: center, radius: outer - 1.5, startAngle: start, endAngle: end, clockwise: false)
+            context.stroke(arc, with: .color(color), lineWidth: 3)
         }
     }
 
-    private func sectorPath(inner: CGFloat, outer: CGFloat, wedge: FanWedge) -> Path {
-        var path = Path()
-        let start = Angle.radians(wedge.startAngle), end = Angle.radians(wedge.endAngle)
-        path.addArc(center: center, radius: outer, startAngle: start, endAngle: end, clockwise: false)
-        path.addArc(center: center, radius: max(inner, 0.01), startAngle: end, endAngle: start, clockwise: true)
-        path.closeSubpath()
-        return path
+    // MARK: Curved (tangential) outer-ring names
+
+    private func drawCurvedNames(_ wedge: FanWedge, in context: inout GraphicsContext) {
+        let person = model.document?.individuals[wedge.id]
+        let midRadius = CGFloat(wedge.generation) * ringWidth + ringWidth / 2
+        drawCurvedText(person?.displayName ?? wedge.id.value, in: &context,
+                       radius: midRadius + 6, midAngle: wedge.midAngle, size: 10, weight: .medium)
+        if let years = lifeYears(person) {
+            drawCurvedText(years, in: &context, radius: midRadius - 12, midAngle: wedge.midAngle,
+                           size: 8, weight: .regular, color: .gray)
+        }
     }
 
-    // MARK: Name labels (wrapped, rotated SwiftUI text)
+    /// Draw `text` along the arc at `radius`, centered on `midAngle`, glyph-by-glyph, each rotated
+    /// tangent (angle + π/2 keeps it readable for an upward fan: horizontal at top, turning up the sides).
+    private func drawCurvedText(_ text: String, in context: inout GraphicsContext, radius: CGFloat,
+                                midAngle: Double, size: CGFloat, weight: Font.Weight, color: Color = .black) {
+        let chars = Array(text)
+        guard !chars.isEmpty, radius > 0 else { return }
+        let anglePerChar = Double(size) * 0.58 / Double(radius)
+        var angle = midAngle - anglePerChar * Double(chars.count) / 2 + anglePerChar / 2
+        for ch in chars {
+            let p = CGPoint(x: center.x + cos(angle) * Double(radius), y: center.y + sin(angle) * Double(radius))
+            context.drawLayer { layer in
+                layer.translateBy(x: p.x, y: p.y)
+                layer.rotate(by: .radians(angle + .pi / 2))
+                layer.draw(Text(String(ch)).font(.system(size: size, weight: weight)).foregroundStyle(color), at: .zero)
+            }
+            angle += anglePerChar
+        }
+    }
 
-    private func label(for wedge: FanWedge) -> some View {
+    // MARK: Radial (inner) names — wrapping SwiftUI Text
+
+    private func radialLabel(_ wedge: FanWedge) -> some View {
         let inner = CGFloat(wedge.generation) * ringWidth
         let midRadius = inner + ringWidth / 2
         let arcLength = CGFloat(wedge.endAngle - wedge.startAngle) * midRadius
         let point = CGPoint(x: center.x + cos(wedge.midAngle) * Double(midRadius),
                             y: center.y + sin(wedge.midAngle) * Double(midRadius))
 
-        // Frame + rotation depend on radial vs tangential orientation.
-        let radial = wedge.generation > 0 && wedge.generation <= radialMaxGeneration
         let w: CGFloat, h: CGFloat, rotation: Double
         if wedge.generation == 0 {
-            (w, h, rotation) = (ringWidth * 1.6, ringWidth * 0.8, 0)            // root: horizontal
-        } else if radial {
-            (w, h, rotation) = (ringWidth * 0.82, arcLength * 0.9, radialRotation(wedge.midAngle))
+            (w, h, rotation) = (ringWidth * 1.6, ringWidth * 0.8, 0)              // root: horizontal
         } else {
-            (w, h, rotation) = (arcLength * 0.92, ringWidth * 0.82, wedge.midAngle + .pi / 2)
+            // Radial: text wraps along the radial extent (width), lines stack along the arc (height).
+            (w, h, rotation) = (ringWidth * 0.84, arcLength * 0.92, radialRotation(wedge.midAngle))
         }
 
-        return labelContent(for: wedge)
+        return labelContent(wedge)
             .frame(width: max(w, 30), height: max(h, 16))
             .rotationEffect(.radians(rotation))
             .position(point)
     }
 
-    @ViewBuilder private func labelContent(for wedge: FanWedge) -> some View {
+    @ViewBuilder private func labelContent(_ wedge: FanWedge) -> some View {
         let person = model.document?.individuals[wedge.id]
         VStack(spacing: 1) {
             Text(person?.displayName ?? wedge.id.value)
@@ -120,7 +145,12 @@ struct FanChartView: View {
         .foregroundStyle(.black)
     }
 
-    /// "1882–1956" / "b. 1882" / "d. 1956" from the person's birth/death years, or nil if unknown.
+    // MARK: Helpers
+
+    /// Radial rotation: reads OUTWARD on the right half, flips to upright (reading inward) on the left
+    /// half — the standard, unavoidable mirror of radial fan text.
+    private func radialRotation(_ theta: Double) -> Double { cos(theta) >= 0 ? theta : theta + .pi }
+
     private func lifeYears(_ person: Individual?) -> String? {
         let b = person?.birth?.date?.earliest?.year ?? person?.birth?.date?.latest?.year
         let d = person?.death?.date?.earliest?.year ?? person?.death?.date?.latest?.year
@@ -132,28 +162,16 @@ struct FanChartView: View {
         }
     }
 
-    /// Radial text rotation: reads OUTWARD on the right half, INWARD on the left half, always upright.
-    private func radialRotation(_ theta: Double) -> Double {
-        cos(theta) >= 0 ? theta : theta + .pi
-    }
-
-    // MARK: Color
-
-    /// A refined, muted four-color palette (Tableau-style) for the grandparent lineages — distinct
-    /// but harmonious, and easy on a white background. The center person uses a neutral slate.
     private func lineageColor(_ wedge: FanWedge) -> Color {
         guard wedge.generation > 0 else { return Color(red: 0.42, green: 0.46, blue: 0.52) }  // slate
         let palette: [Color] = [
             Color(red: 0.31, green: 0.48, blue: 0.65),   // muted blue
             Color(red: 0.35, green: 0.63, blue: 0.49),   // sage green
-            Color(red: 0.84, green: 0.42, blue: 0.40),   // terracotta red
-            Color(red: 0.90, green: 0.68, blue: 0.31),   // warm amber
+            Color(red: 0.84, green: 0.42, blue: 0.40),   // terracotta
+            Color(red: 0.90, green: 0.68, blue: 0.31),   // amber
         ]
-        let bucket = layout.lineageBucket(of: wedge, buckets: lineageBuckets)
-        return palette[bucket % palette.count]
+        return palette[layout.lineageBucket(of: wedge, buckets: lineageBuckets) % palette.count]
     }
-
-    // MARK: Hit-testing
 
     private func hitTest(_ location: CGPoint) {
         let dx = location.x - center.x, dy = location.y - center.y

@@ -78,6 +78,8 @@ struct ChartsView: View {
                     .scaleEffect(scale, anchor: .topLeading)
                     .padding(20)
             }
+            // The fan uses a light theme; fill the whole scroll area white (not just the fan rect).
+            .background(kind == .fan ? Color.white : Color.clear)
         } else {
             ContentUnavailableView("Nothing to chart", systemImage: "chart.xyaxis.line",
                                    description: Text("Set a Home person or select someone to chart."))
