@@ -71,6 +71,8 @@ struct ShellView: View {
         switch model.currentSection {
         case .people:
             PeopleListView(model: model)
+        case .families:
+            FamiliesListView(model: model)
         default:
             // A5–A8 sections land later; show a friendly placeholder for now.
             ContentUnavailableView(
@@ -83,11 +85,14 @@ struct ShellView: View {
     // MARK: Detail column
 
     @ViewBuilder private var detail: some View {
+        // Focus is a single Xref that may name a person or a family; route accordingly.
         if let focus = model.focus, model.document?.individuals[focus] != nil {
             PersonDetailView(personID: focus, model: model)
+        } else if let focus = model.focus, model.document?.families[focus] != nil {
+            FamilyDetailView(familyID: focus, model: model)
         } else {
             ContentUnavailableView("No selection", systemImage: "person.crop.circle",
-                                   description: Text("Select a person to see their details."))
+                                   description: Text("Select a person or family to see details."))
         }
     }
 }
