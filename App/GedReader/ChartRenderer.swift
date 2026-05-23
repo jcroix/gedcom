@@ -27,7 +27,10 @@ enum ChartRenderer {
         case "Descendant":
             chart = AnyView(NodeChartView(layout: ChartLayoutEngine.descendant(root: root, depth: gens, index: index), model: model))
         default:
-            chart = AnyView(FanChartView(layout: ChartLayoutEngine.fan(root: root, generations: gens, index: index), model: model))
+            let sweep = Double.pi * 1.5
+            chart = AnyView(FanChartView(layout: ChartLayoutEngine.fan(root: root, generations: gens, index: index,
+                                                                       sweep: sweep, startAngle: 1.5 * .pi - sweep / 2),
+                                         model: model))
         }
 
         let renderer = ImageRenderer(content: chart.background(.white))

@@ -30,7 +30,14 @@ struct FanChartView: View {
     private let lineSpacing: CGFloat = 12          // radial px between wrapped lines
 
     private var radius: CGFloat { CGFloat(layout.generations) * ringWidth }
-    private var center: CGPoint { CGPoint(x: radius, y: radius) }   // bottom-center; opens upward
+
+    /// Total angular sweep of the fan (read from the root wedge, which spans it all).
+    private var sweep: Double { layout.wedges.first { $0.generation == 0 }.map { $0.endAngle - $0.startAngle } ?? .pi }
+
+    /// Center sits where the top of the fan is `radius` above it. For sweeps wider than 180° the fan
+    /// dips below the center on the sides, so the frame is taller than `radius`.
+    private var center: CGPoint { CGPoint(x: radius, y: radius) }
+    private var frameHeight: CGFloat { radius * CGFloat(max(1.0, 1.0 - cos(sweep / 2))) }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -42,7 +49,7 @@ struct FanChartView: View {
                 }
             }
         }
-        .frame(width: radius * 2, height: radius)
+        .frame(width: radius * 2, height: frameHeight)
         .contentShape(Rectangle())
         .gesture(SpatialTapGesture().onEnded { hitTest($0.location) })
     }

@@ -95,7 +95,11 @@ struct ChartsView: View {
             NodeChartView(layout: ChartLayoutEngine.descendant(root: root, depth: generations, index: index),
                           model: model)
         case .fan:
-            FanChartView(layout: ChartLayoutEngine.fan(root: root, generations: generations, index: index),
+            // 270° sweep centered at the top (like FamilySearch) so deep branches don't pile up
+            // vertically at the 3/9-o'clock edges of a strict half-fan.
+            let sweep = Double.pi * 1.5
+            FanChartView(layout: ChartLayoutEngine.fan(root: root, generations: generations, index: index,
+                                                       sweep: sweep, startAngle: 1.5 * .pi - sweep / 2),
                          model: model)
         }
     }
