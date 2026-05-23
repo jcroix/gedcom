@@ -100,4 +100,17 @@ final class ChartLayoutEngineTests: XCTestCase {
         XCTAssertEqual(try wedge("@F@").endAngle, .pi / 2, accuracy: 0.0001)
         XCTAssertEqual(try wedge("@M@").startAngle, .pi / 2, accuracy: 0.0001)
     }
+
+    /// Lineage buckets divide the fan into equal angular slices, so each branch colors consistently.
+    func testFanLineageBucketsByBranch() throws {
+        let layout = ChartLayoutEngine.fan(root: Xref("@C@"), generations: 3, index: index(),
+                                           sweep: .pi, startAngle: 0)
+        func wedge(_ x: String) throws -> FanWedge { try XCTUnwrap(layout.wedges.first { $0.id == Xref(x) }) }
+
+        // With 4 buckets across [0, π]: the two paternal grandparents fall in the first two slices,
+        // the maternal grandmother in the last.
+        XCTAssertEqual(layout.lineageBucket(of: try wedge("@GF@"), buckets: 4), 0)
+        XCTAssertEqual(layout.lineageBucket(of: try wedge("@GM@"), buckets: 4), 1)
+        XCTAssertEqual(layout.lineageBucket(of: try wedge("@M@"), buckets: 4), 3)
+    }
 }

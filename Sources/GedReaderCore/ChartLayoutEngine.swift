@@ -197,4 +197,17 @@ public struct FanLayout: Sendable, Equatable {
     public init(wedges: [FanWedge], generations: Int) {
         self.wedges = wedges; self.generations = generations
     }
+
+    /// Which lineage "bucket" a wedge belongs to, for consistent per-branch coloring (à la
+    /// FamilySearch's 4 grandparent colors). Buckets divide the whole fan sweep into `buckets`
+    /// equal angular slices, so every ancestor in the same slice (the same descending branch)
+    /// gets the same bucket regardless of generation. The root (gen 0) spans everything; callers
+    /// typically color it separately.
+    public func lineageBucket(of wedge: FanWedge, buckets: Int) -> Int {
+        guard buckets > 0, let root = wedges.first(where: { $0.generation == 0 }) else { return 0 }
+        let span = root.endAngle - root.startAngle
+        guard span > 0 else { return 0 }
+        let fraction = (wedge.midAngle - root.startAngle) / span      // 0..1 across the fan
+        return min(max(Int(fraction * Double(buckets)), 0), buckets - 1)
+    }
 }

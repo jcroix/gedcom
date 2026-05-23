@@ -36,6 +36,11 @@ struct ChartsView: View {
             chartArea
         }
         .navigationTitle("Charts")
+        // Headless smoke-test hook (no effect in normal use): pick the chart type at launch.
+        .task {
+            if let raw = ProcessInfo.processInfo.environment["GEDREADER_AUTOCHART"],
+               let k = Kind(rawValue: raw) { kind = k }
+        }
     }
 
     private var controls: some View {
