@@ -233,11 +233,19 @@ struct FanChartView: View {
     }
 
     /// The wedge at a point in the view's local coordinates (polar hit-test), or nil.
+    ///
+    /// `atan2` is normalized to [0, 2π), but a >180° fan has wedges whose angles run past 2π (the
+    /// lower-right of a 270° fan spans [2π, 2.25π]). So we test BOTH `angle` and `angle + 2π` against
+    /// each wedge's range — otherwise those wrapped wedges would be unselectable/un-highlightable.
     private func wedge(at location: CGPoint) -> FanWedge? {
         let dx = location.x - center.x, dy = location.y - center.y
         let ring = Int(hypot(dx, dy) / ringWidth)
         var angle = atan2(dy, dx)
         if angle < 0 { angle += 2 * .pi }
-        return layout.wedges.first { $0.generation == ring && angle >= $0.startAngle && angle < $0.endAngle }
+        return layout.wedges.first { wedge in
+            guard wedge.generation == ring else { return false }
+            return (angle >= wedge.startAngle && angle < wedge.endAngle)
+                || (angle + 2 * .pi >= wedge.startAngle && angle + 2 * .pi < wedge.endAngle)
+        }
     }
 }
