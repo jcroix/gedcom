@@ -18,20 +18,23 @@ public struct DocumentBundle: Sendable {
     public let document: GedcomDocument
     public let index: RelationshipIndex
     public let issues: [Issue]
+    public let searchIndex: SearchIndex
 
-    public init(document: GedcomDocument, index: RelationshipIndex, issues: [Issue]) {
+    public init(document: GedcomDocument, index: RelationshipIndex, issues: [Issue], searchIndex: SearchIndex) {
         self.document = document
         self.index = index
         self.issues = issues
+        self.searchIndex = searchIndex
     }
 
-    /// Parse `data`, build the relationship index, and run the quality checker. Pure and
+    /// Parse `data`, build the relationship + search indexes, and run the quality checker. Pure and
     /// side-effect-free, so it's safe to run on a background task. Never throws — the engine
     /// degrades malformed input into diagnostics.
     public static func build(from data: Data) -> DocumentBundle {
         let document = GedcomDocument.load(data)
         let index = RelationshipIndex.build(from: document)
         let issues = QualityChecker.issues(for: document, index: index)
-        return DocumentBundle(document: document, index: index, issues: issues)
+        let searchIndex = SearchIndex.build(from: document)
+        return DocumentBundle(document: document, index: index, issues: issues, searchIndex: searchIndex)
     }
 }

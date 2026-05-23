@@ -65,6 +65,12 @@ public final class DocumentModel {
         return []
     }
 
+    /// The precomputed search index, or nil unless loaded.
+    public var searchIndex: SearchIndex? {
+        if case .loaded(let bundle) = state { return bundle.searchIndex }
+        return nil
+    }
+
     /// A short summary line for the loaded file, e.g. "2,000 people · 594 families".
     public var summary: String? {
         guard let document else { return nil }
