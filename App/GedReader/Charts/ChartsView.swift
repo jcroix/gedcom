@@ -23,6 +23,7 @@ struct ChartsView: View {
     // Shared with Settings (⌘,) and persisted across launches.
     @AppStorage("chartGenerations") private var generations = 4
     @State private var scale: CGFloat = 1
+    @State private var chartBaseSize: CGSize = .zero   // measured natural size of the chart (scale 1)
 
     /// Chart root: explicit Home, else current focus, else the first person in the file.
     private var root: Xref? {
@@ -74,10 +75,23 @@ struct ChartsView: View {
     @ViewBuilder private var chartArea: some View {
         if let root, let index = model.relationshipIndex {
             ScrollView([.horizontal, .vertical]) {
+                // `scaleEffect` only scales visually — it does NOT change layout size, so the
+                // ScrollView wouldn't know the zoomed content grew (you couldn't scroll to the parts
+                // pushed off-screen). We measure the chart's natural size (it's `fixedSize`, so that
+                // size is independent of the wrapping frame), scale it, then size the frame to
+                // base × scale so the ScrollView's scrollable content matches what's drawn.
                 chart(root: root, index: index)
+                    .fixedSize()
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: ChartBaseSizeKey.self, value: proxy.size)
+                    })
                     .scaleEffect(scale, anchor: .topLeading)
+                    .frame(width: chartBaseSize.width * scale,
+                           height: chartBaseSize.height * scale,
+                           alignment: .topLeading)
                     .padding(20)
             }
+            .onPreferenceChange(ChartBaseSizeKey.self) { chartBaseSize = $0 }
             // The fan uses a light theme; fill the whole scroll area white (not just the fan rect).
             .background(kind == .fan ? Color.white : Color.clear)
         } else {
@@ -102,5 +116,15 @@ struct ChartsView: View {
                                                        sweep: sweep, startAngle: 1.5 * .pi - sweep / 2),
                          model: model)
         }
+    }
+}
+
+/// Carries the chart's measured natural (scale-1) size up so the zoom frame can be sized to
+/// base × scale, making the ScrollView scrollable across zoomed-in content.
+private struct ChartBaseSizeKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        if next != .zero { value = next }
     }
 }
