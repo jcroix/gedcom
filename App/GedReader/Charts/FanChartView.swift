@@ -1,19 +1,18 @@
 //
 // FanChartView.swift — a fan ancestor chart, FamilySearch-styled (A8).
 //
-// Layout (matches FamilySearch, per user feedback):
-//   * WHITE background, dark text.
-//   * Tasteful lineage color (refined 4-color palette) as a subtle wedge tint + a bold colored
-//     OUTER-RING arc. Center person in neutral slate.
-//   * INNER rings (generations 1…radialMaxGeneration): names are RADIAL — straight, multi-line
-//     SwiftUI Text that wraps to fit the wedge (so long names don't overflow). Read outward; on the
-//     left half they flip to stay upright (the unavoidable mirror of any fan's radial text).
-//   * OUTER rings (beyond radialMaxGeneration): names are TANGENTIAL and CURVED — drawn glyph-by-
-//     glyph along the arc (rotated tangent), the way FamilySearch curves great-grandparents and out.
+// ONE CONSISTENT TEXT RULE (after earlier inconsistency):
+//   * The center person (generation 0) is drawn HORIZONTALLY.
+//   * EVERY ancestor ring draws its name TANGENTIALLY — curved along the arc, glyph-by-glyph — and
+//     WRAPS onto multiple curved lines so long names fit instead of overflowing. There is no radial
+//     text and no per-generation switching, so orientation is uniform everywhere.
 //
-// Rendering is hybrid: a Canvas draws the wedge fills/outlines/arcs AND the curved outer names; the
-// radial inner names are positioned/rotated SwiftUI Text on top (free wrapping). Whole-wedge taps use
-// a polar hit-test. The fan is a half-fan (sweep π): root at bottom-center, ancestors sweeping the top.
+// Curved-glyph rotation is `glyphAngle + π/2`, which for this upward-opening half-fan reads
+// horizontally across the top and turns smoothly up the sides — never upside down.
+//
+// Styling: white background, dark text, a refined 4-color lineage palette as a subtle wedge tint
+// plus a bold colored OUTER-RING arc; the center is neutral slate. Whole-wedge taps use a polar
+// hit-test. The fan is a half-fan (sweep π): root at bottom-center, ancestors sweeping the top.
 //
 
 import SwiftUI
@@ -24,9 +23,11 @@ struct FanChartView: View {
     let layout: FanLayout
     let model: DocumentModel
 
-    private let ringWidth: CGFloat = 100
-    private let radialMaxGeneration = 3          // gens 1–3 radial; 4+ tangential/curved
+    private let ringWidth: CGFloat = 104
     private let lineageBuckets = 4
+    private let nameSize: CGFloat = 10
+    private let dateSize: CGFloat = 8
+    private let lineSpacing: CGFloat = 12          // radial px between wrapped lines
 
     private var radius: CGFloat { CGFloat(layout.generations) * ringWidth }
     private var center: CGPoint { CGPoint(x: radius, y: radius) }   // bottom-center; opens upward
@@ -34,18 +35,11 @@ struct FanChartView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.white
-            // Wedge geometry + colored arcs + the CURVED outer-ring names, all in one Canvas.
             Canvas { context, _ in
                 for wedge in layout.wedges {
                     drawWedge(wedge, in: &context)
-                    if wedge.generation > radialMaxGeneration {
-                        drawCurvedNames(wedge, in: &context)
-                    }
+                    drawNames(wedge, in: &context)
                 }
-            }
-            // Radial inner names (and the root) as wrapping SwiftUI Text overlays.
-            ForEach(layout.wedges.filter { $0.generation <= radialMaxGeneration }) { wedge in
-                radialLabel(wedge).allowsHitTesting(false)
             }
         }
         .frame(width: radius * 2, height: radius)
@@ -59,9 +53,9 @@ struct FanChartView: View {
         let inner = CGFloat(wedge.generation) * ringWidth
         let outer = inner + ringWidth
         let color = lineageColor(wedge)
+        let start = Angle.radians(wedge.startAngle), end = Angle.radians(wedge.endAngle)
 
         var sector = Path()
-        let start = Angle.radians(wedge.startAngle), end = Angle.radians(wedge.endAngle)
         sector.addArc(center: center, radius: outer, startAngle: start, endAngle: end, clockwise: false)
         sector.addArc(center: center, radius: max(inner, 0.01), startAngle: end, endAngle: start, clockwise: true)
         sector.closeSubpath()
@@ -75,23 +69,61 @@ struct FanChartView: View {
         }
     }
 
-    // MARK: Curved (tangential) outer-ring names
+    // MARK: Names
 
-    private func drawCurvedNames(_ wedge: FanWedge, in context: inout GraphicsContext) {
+    private func drawNames(_ wedge: FanWedge, in context: inout GraphicsContext) {
         let person = model.document?.individuals[wedge.id]
-        let midRadius = CGFloat(wedge.generation) * ringWidth + ringWidth / 2
-        drawCurvedText(person?.displayName ?? wedge.id.value, in: &context,
-                       radius: midRadius + 6, midAngle: wedge.midAngle, size: 10, weight: .medium)
-        if let years = lifeYears(person) {
-            drawCurvedText(years, in: &context, radius: midRadius - 12, midAngle: wedge.midAngle,
-                           size: 8, weight: .regular, color: .gray)
+        let name = person?.displayName ?? wedge.id.value
+        let dates = lifeYears(person)
+
+        // Center person: horizontal, multi-line.
+        if wedge.generation == 0 {
+            let point = CGPoint(x: center.x, y: center.y - Double(ringWidth) / 2)
+            let text = (dates == nil) ? name : "\(name)\n\(dates!)"
+            context.draw(Text(text).font(.system(size: nameSize + 2, weight: .medium))
+                .foregroundStyle(.black), at: point)
+            return
+        }
+
+        // Ancestors: curved, wrapped, name lines then a date line, centered in the ring.
+        let inner = CGFloat(wedge.generation) * ringWidth
+        let midRadius = inner + ringWidth / 2
+        let wedgeAngle = wedge.endAngle - wedge.startAngle
+        let maxChars = max(4, Int(wedgeAngle * Double(midRadius) * 0.86 / (Double(nameSize) * 0.58)))
+
+        var lines = wrap(name, maxChars: maxChars)
+        if lines.count > 4 { lines = Array(lines.prefix(4)) }     // keep paragraphs sane
+        let total = CGFloat(lines.count) + (dates == nil ? 0 : 0.85)
+        var r = midRadius + (total - 1) / 2 * lineSpacing         // first (outer) line
+
+        for line in lines {
+            drawCurvedLine(line, in: &context, radius: r, midAngle: wedge.midAngle,
+                           size: nameSize, weight: .medium, color: .black)
+            r -= lineSpacing
+        }
+        if let dates {
+            drawCurvedLine(dates, in: &context, radius: r, midAngle: wedge.midAngle,
+                           size: dateSize, weight: .regular, color: Color(white: 0.45))
         }
     }
 
-    /// Draw `text` along the arc at `radius`, centered on `midAngle`, glyph-by-glyph, each rotated
-    /// tangent (angle + π/2 keeps it readable for an upward fan: horizontal at top, turning up the sides).
-    private func drawCurvedText(_ text: String, in context: inout GraphicsContext, radius: CGFloat,
-                                midAngle: Double, size: CGFloat, weight: Font.Weight, color: Color = .black) {
+    /// Greedy word wrap to lines of at most `maxChars` characters (a single long word gets its own line).
+    private func wrap(_ text: String, maxChars: Int) -> [String] {
+        var lines: [String] = []
+        var current = ""
+        for word in text.split(separator: " ") {
+            if current.isEmpty { current = String(word) }
+            else if current.count + 1 + word.count <= maxChars { current += " " + word }
+            else { lines.append(current); current = String(word) }
+        }
+        if !current.isEmpty { lines.append(current) }
+        return lines.isEmpty ? [text] : lines
+    }
+
+    /// Draw one line of text along the arc at `radius`, centered on `midAngle`, glyph-by-glyph with
+    /// each rotated tangent (`angle + π/2` — readable across the top, turning up the sides).
+    private func drawCurvedLine(_ text: String, in context: inout GraphicsContext, radius: CGFloat,
+                                midAngle: Double, size: CGFloat, weight: Font.Weight, color: Color) {
         let chars = Array(text)
         guard !chars.isEmpty, radius > 0 else { return }
         let anglePerChar = Double(size) * 0.58 / Double(radius)
@@ -107,49 +139,7 @@ struct FanChartView: View {
         }
     }
 
-    // MARK: Radial (inner) names — wrapping SwiftUI Text
-
-    private func radialLabel(_ wedge: FanWedge) -> some View {
-        let inner = CGFloat(wedge.generation) * ringWidth
-        let midRadius = inner + ringWidth / 2
-        let arcLength = CGFloat(wedge.endAngle - wedge.startAngle) * midRadius
-        let point = CGPoint(x: center.x + cos(wedge.midAngle) * Double(midRadius),
-                            y: center.y + sin(wedge.midAngle) * Double(midRadius))
-
-        let w: CGFloat, h: CGFloat, rotation: Double
-        if wedge.generation == 0 {
-            (w, h, rotation) = (ringWidth * 1.6, ringWidth * 0.8, 0)              // root: horizontal
-        } else {
-            // Radial: text wraps along the radial extent (width), lines stack along the arc (height).
-            (w, h, rotation) = (ringWidth * 0.84, arcLength * 0.92, radialRotation(wedge.midAngle))
-        }
-
-        return labelContent(wedge)
-            .frame(width: max(w, 30), height: max(h, 16))
-            .rotationEffect(.radians(rotation))
-            .position(point)
-    }
-
-    @ViewBuilder private func labelContent(_ wedge: FanWedge) -> some View {
-        let person = model.document?.individuals[wedge.id]
-        VStack(spacing: 1) {
-            Text(person?.displayName ?? wedge.id.value)
-                .font(.system(size: wedge.generation == 0 ? 12 : 10, weight: .medium))
-            if let years = lifeYears(person) {
-                Text(years).font(.system(size: 8)).foregroundStyle(.secondary)
-            }
-        }
-        .multilineTextAlignment(.center)
-        .minimumScaleFactor(0.5)
-        .lineLimit(4)
-        .foregroundStyle(.black)
-    }
-
     // MARK: Helpers
-
-    /// Radial rotation: reads OUTWARD on the right half, flips to upright (reading inward) on the left
-    /// half — the standard, unavoidable mirror of radial fan text.
-    private func radialRotation(_ theta: Double) -> Double { cos(theta) >= 0 ? theta : theta + .pi }
 
     private func lifeYears(_ person: Individual?) -> String? {
         let b = person?.birth?.date?.earliest?.year ?? person?.birth?.date?.latest?.year

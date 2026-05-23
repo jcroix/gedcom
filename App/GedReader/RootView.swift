@@ -57,6 +57,9 @@ struct RootView: View {
             await loadAndRecord(URL(fileURLWithPath: path))
             if let home = env["GEDREADER_AUTOHOME"] { model.navigate(to: Xref(home)); model.setHomeToFocus() }
             if let raw = env["GEDREADER_AUTOSECTION"], let s = SidebarSection(rawValue: raw) { model.currentSection = s }
+            // Offscreen render hook: write a chart PNG and exit (so Claude can SEE its own output
+            // headlessly via SwiftUI ImageRenderer — no screen-recording/display needed).
+            if let png = env["GEDREADER_RENDER_PNG"] { ChartRenderer.renderAndExit(model: model, env: env, to: png) }
             return
         }
         // Otherwise restore the last opened file (and its section/home) if it still exists.
