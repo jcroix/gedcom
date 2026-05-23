@@ -17,13 +17,24 @@ xcodegen generate          # requires: brew install xcodegen
 
 ## Build & run
 
+The easiest way is the **Makefile at the repo root** (it handles xcodegen + xcodebuild for you):
+
+```bash
+make run        # build the app and launch it
+make app        # build only (Debug);   make release  for Release
+make test       # run all unit tests
+make help       # list all targets
+```
+
+Equivalent raw commands, if you prefer:
+
 ```bash
 cd App
+xcodegen generate
 xcodebuild -project GedReader.xcodeproj -scheme GedReader \
   -configuration Debug -destination 'platform=macOS' -derivedDataPath build build
 open build/Build/Products/Debug/GedReader.app
 ```
 
-For a release build, swap `-configuration Release`. Note: no Apple Developer signing identity is
-configured, so builds are **ad-hoc signed** (`CODE_SIGN_IDENTITY = -`) — fine for local running,
-not for distribution.
+Note: no Apple Developer signing identity is configured, so builds are **ad-hoc signed**
+(`CODE_SIGN_IDENTITY = -`) — fine for local running, not for distribution.
