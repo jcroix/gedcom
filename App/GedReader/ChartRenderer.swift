@@ -28,9 +28,10 @@ enum ChartRenderer {
             chart = AnyView(NodeChartView(layout: ChartLayoutEngine.descendant(root: root, depth: gens, index: index), model: model))
         default:
             let sweep = Double.pi * 1.5
+            let hover = env["GEDREADER_HOVER"].map { Xref($0) }   // force a highlighted wedge for verification
             chart = AnyView(FanChartView(layout: ChartLayoutEngine.fan(root: root, generations: gens, index: index,
                                                                        sweep: sweep, startAngle: 1.5 * .pi - sweep / 2),
-                                         model: model))
+                                         model: model, previewHover: hover))
         }
 
         let renderer = ImageRenderer(content: chart.background(.white))

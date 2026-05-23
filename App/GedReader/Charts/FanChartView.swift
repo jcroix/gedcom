@@ -24,6 +24,15 @@ import GedcomKit
 struct FanChartView: View {
     let layout: FanLayout
     let model: DocumentModel
+    /// Left-click on a wedge (select / show details).
+    var onSelect: (Xref) -> Void = { _ in }
+    /// Right-click menu choice: re-root the chart on this person as the given chart kind.
+    var onPickChart: (Xref, ChartKind) -> Void = { _, _ in }
+    /// Forces a wedge to render highlighted (used only by the offscreen render hook to verify hover).
+    var previewHover: Xref? = nil
+
+    /// The wedge currently under the mouse (drives the hover highlight + the context menu target).
+    @State private var hoveredXref: Xref?
 
     private let ringWidth: CGFloat = 116
     private let curvedMaxGeneration = 2          // gens 1–2 curved/tangential; 3+ radial
@@ -54,7 +63,29 @@ struct FanChartView: View {
         }
         .frame(width: radius * 2, height: frameHeight)
         .contentShape(Rectangle())
-        .gesture(SpatialTapGesture().onEnded { hitTest($0.location) })
+        // Left-click selects the wedge under the cursor.
+        .gesture(SpatialTapGesture(coordinateSpace: .local).onEnded {
+            if let wedge = wedge(at: $0.location) { onSelect(wedge.id) }
+        })
+        // Track the mouse to highlight the hovered wedge (white → light grey, FamilySearch-style).
+        .onContinuousHover(coordinateSpace: .local) { phase in
+            switch phase {
+            case .active(let point): hoveredXref = wedge(at: point)?.id
+            case .ended: hoveredXref = nil
+            }
+        }
+        // Right-click the hovered wedge to re-root a chart on that person.
+        .contextMenu {
+            if let id = hoveredXref, let person = model.document?.individuals[id] {
+                Text(person.displayName)
+                Divider()
+                Button("Center Fan Here") { onPickChart(id, .fan) }
+                Button("Pedigree From Here") { onPickChart(id, .pedigree) }
+                Button("Descendants From Here") { onPickChart(id, .descendant) }
+                Divider()
+                Button("Show Details") { onSelect(id) }
+            }
+        }
     }
 
     // MARK: Wedge fill / outline / colored arc
@@ -69,7 +100,9 @@ struct FanChartView: View {
         sector.addArc(center: center, radius: outer, startAngle: start, endAngle: end, clockwise: false)
         sector.addArc(center: center, radius: max(inner, 0.01), startAngle: end, endAngle: start, clockwise: true)
         sector.closeSubpath()
-        context.fill(sector, with: .color(color.opacity(0.16)))
+        // Hovered wedge turns light grey (like FamilySearch); otherwise a subtle lineage tint.
+        let highlighted = (hoveredXref ?? previewHover) == wedge.id
+        context.fill(sector, with: .color(highlighted ? Color(white: 0.82) : color.opacity(0.16)))
         context.stroke(sector, with: .color(Color(white: 0.80)), lineWidth: 1)
         if wedge.generation > 0 {
             var arc = Path()
@@ -201,13 +234,12 @@ struct FanChartView: View {
         return palette[layout.lineageBucket(of: wedge, buckets: lineageBuckets) % palette.count]
     }
 
-    private func hitTest(_ location: CGPoint) {
+    /// The wedge at a point in the view's local coordinates (polar hit-test), or nil.
+    private func wedge(at location: CGPoint) -> FanWedge? {
         let dx = location.x - center.x, dy = location.y - center.y
         let ring = Int(hypot(dx, dy) / ringWidth)
         var angle = atan2(dy, dx)
         if angle < 0 { angle += 2 * .pi }
-        if let wedge = layout.wedges.first(where: { $0.generation == ring && angle >= $0.startAngle && angle < $0.endAngle }) {
-            model.navigate(to: wedge.id)
-        }
+        return layout.wedges.first { $0.generation == ring && angle >= $0.startAngle && angle < $0.endAngle }
     }
 }

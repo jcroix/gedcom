@@ -11,23 +11,26 @@ import SwiftUI
 import GedReaderCore
 import GedcomKit
 
+/// The chart types the Charts section can draw (shared with FanChartView's context menu).
+enum ChartKind: String, CaseIterable, Identifiable {
+    case pedigree = "Pedigree", descendant = "Descendant", fan = "Fan"
+    var id: String { rawValue }
+}
+
 struct ChartsView: View {
     let model: DocumentModel
 
-    enum Kind: String, CaseIterable, Identifiable {
-        case pedigree = "Pedigree", descendant = "Descendant", fan = "Fan"
-        var id: String { rawValue }
-    }
-
-    @State private var kind: Kind = .pedigree
+    @State private var kind: ChartKind = .pedigree
     // Shared with Settings (⌘,) and persisted across launches.
     @AppStorage("chartGenerations") private var generations = 4
     @State private var scale: CGFloat = 1
     @State private var chartBaseSize: CGSize = .zero   // measured natural size of the chart (scale 1)
+    // When set (by clicking/right-clicking a wedge), the chart re-roots on this person; nil = home.
+    @State private var chartRoot: Xref?
 
-    /// Chart root: explicit Home, else current focus, else the first person in the file.
+    /// Chart root: an explicit re-center, else Home, else current focus, else the first person.
     private var root: Xref? {
-        model.homePerson ?? model.focus ?? model.document?.allIndividuals.first?.id
+        chartRoot ?? model.homePerson ?? model.focus ?? model.document?.allIndividuals.first?.id
     }
 
     var body: some View {
@@ -40,14 +43,14 @@ struct ChartsView: View {
         // Headless smoke-test hook (no effect in normal use): pick the chart type at launch.
         .task {
             if let raw = ProcessInfo.processInfo.environment["GEDREADER_AUTOCHART"],
-               let k = Kind(rawValue: raw) { kind = k }
+               let k = ChartKind(rawValue: raw) { kind = k }
         }
     }
 
     private var controls: some View {
         HStack(spacing: 16) {
             Picker("Chart", selection: $kind) {
-                ForEach(Kind.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(ChartKind.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .frame(width: 280)
@@ -55,6 +58,11 @@ struct ChartsView: View {
 
             Stepper("Generations: \(generations)", value: $generations, in: 3...8)
                 .fixedSize()
+
+            // Shown once the chart has been re-centered on someone else: jump back to the home root.
+            if chartRoot != nil {
+                Button { chartRoot = nil } label: { Label("Recenter on Home", systemImage: "house") }
+            }
 
             Spacer()
 
@@ -112,9 +120,18 @@ struct ChartsView: View {
             // 270° sweep centered at the top (like FamilySearch) so deep branches don't pile up
             // vertically at the 3/9-o'clock edges of a strict half-fan.
             let sweep = Double.pi * 1.5
-            FanChartView(layout: ChartLayoutEngine.fan(root: root, generations: generations, index: index,
-                                                       sweep: sweep, startAngle: 1.5 * .pi - sweep / 2),
-                         model: model)
+            FanChartView(
+                layout: ChartLayoutEngine.fan(root: root, generations: generations, index: index,
+                                              sweep: sweep, startAngle: 1.5 * .pi - sweep / 2),
+                model: model,
+                // Left-click selects (shows the person in the detail pane).
+                onSelect: { model.navigate(to: $0) },
+                // Right-click menu: re-root the chart on that person as the chosen kind.
+                onPickChart: { id, pickedKind in
+                    model.navigate(to: id)
+                    chartRoot = id
+                    kind = pickedKind
+                })
         }
     }
 }
