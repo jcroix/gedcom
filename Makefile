@@ -81,10 +81,12 @@ app: $(PROJECT)
 release:
 	$(MAKE) app CONFIG=Release
 
-# Build (current CONFIG) then launch the app.
+# Build (current CONFIG) then launch the app. We QUIT any running instance first, because `open`
+# would otherwise just re-activate the already-running (stale) copy instead of the rebuilt binary.
 .PHONY: run
 run: app
-	open "$(APP_PRODUCT)"
+	-pkill -x GedReader 2>/dev/null; sleep 1
+	open -n "$(APP_PRODUCT)"
 
 # ---- Cleanup -----------------------------------------------------------------
 
