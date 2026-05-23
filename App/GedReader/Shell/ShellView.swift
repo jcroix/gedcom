@@ -77,8 +77,11 @@ struct ShellView: View {
             QualityView(model: model)
         case .relationships:
             RelationshipView(model: model)
+        case .charts:
+            ChartsView(model: model)
         default:
-            // A5–A8 sections land later; show a friendly placeholder for now.
+            // Source-system sections (Sources/Media/Repositories) are browsable via the tree;
+            // dedicated views can be added when a file actually exercises them.
             ContentUnavailableView(
                 "\(model.currentSection.title) — coming soon",
                 systemImage: model.currentSection.systemImage,

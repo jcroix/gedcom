@@ -12,6 +12,7 @@ import AppKit
 import Combine
 import UniformTypeIdentifiers
 import GedReaderCore
+import GedcomKit
 
 struct RootView: View {
     @State private var model = DocumentModel()
@@ -36,11 +37,19 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openGedcomRequested)) { _ in
             presentOpenPanel()
         }
-        // Headless smoke-test hook: if GEDREADER_AUTOLOAD names a file, open it on launch. Lets a
-        // script verify the UI renders a real file without crashing (no effect in normal use).
+        // Headless smoke-test hook (no effect in normal use): GEDREADER_AUTOLOAD opens a file on
+        // launch; optional GEDREADER_AUTOHOME (an xref) sets the chart root; GEDREADER_AUTOSECTION
+        // jumps to a section. Lets a script verify each section renders a real file without crashing.
         .task {
-            if let path = ProcessInfo.processInfo.environment["GEDREADER_AUTOLOAD"] {
-                await model.loadFile(at: URL(fileURLWithPath: path))
+            let env = ProcessInfo.processInfo.environment
+            guard let path = env["GEDREADER_AUTOLOAD"] else { return }
+            await model.loadFile(at: URL(fileURLWithPath: path))
+            if let home = env["GEDREADER_AUTOHOME"] {
+                model.navigate(to: Xref(home))
+                model.setHomeToFocus()
+            }
+            if let raw = env["GEDREADER_AUTOSECTION"], let section = SidebarSection(rawValue: raw) {
+                model.currentSection = section
             }
         }
     }
