@@ -65,6 +65,21 @@ final class DocumentModelTests: XCTestCase {
         XCTAssertEqual(model.homePerson, Xref("@I2@"), "Set Home is independent of back/forward.")
     }
 
+    /// Go Home navigates to the set home person; the section defaults to People.
+    func testGoHomeNavigatesToHomePerson() {
+        let model = DocumentModel()
+        model.load(data: Data(validGedcom.utf8))
+        XCTAssertEqual(model.currentSection, .people)
+
+        model.navigate(to: Xref("@I1@"))
+        model.setHomeToFocus()
+        model.navigate(to: Xref("@I2@"))
+        XCTAssertEqual(model.focus, Xref("@I2@"))
+
+        model.goHome()
+        XCTAssertEqual(model.focus, Xref("@I1@"))
+    }
+
     /// Loading the real family.ged through the model yields the expected counts and summary.
     func testLoadsRealFamilyFileSummary() throws {
         let model = DocumentModel()

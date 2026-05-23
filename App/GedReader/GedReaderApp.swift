@@ -16,13 +16,7 @@ struct GedReaderApp: App {
             RootView()
         }
         .commands {
-            // Replace "New" with "Open…" (⌘O) — v1 has nothing to create, only files to open.
-            CommandGroup(replacing: .newItem) {
-                Button("Open…") {
-                    NotificationCenter.default.post(name: .openGedcomRequested, object: nil)
-                }
-                .keyboardShortcut("o", modifiers: .command)
-            }
+            GedReaderCommands()
         }
     }
 }

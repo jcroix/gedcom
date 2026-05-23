@@ -15,7 +15,6 @@ import GedcomKit
 
 struct ShellView: View {
     @Bindable var model: DocumentModel
-    @State private var selectedSection: SidebarSection? = .people
 
     var body: some View {
         NavigationSplitView {
@@ -28,12 +27,32 @@ struct ShellView: View {
         }
         .navigationTitle("GedReader")
         .navigationSubtitle(model.summary ?? "")
+        .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Button { model.goBack() } label: { Image(systemName: "chevron.left") }
+                    .disabled(!model.canGoBack)
+                    .help("Back")
+                Button { model.goForward() } label: { Image(systemName: "chevron.right") }
+                    .disabled(!model.canGoForward)
+                    .help("Forward")
+            }
+            ToolbarItem {
+                Button { model.setHomeToFocus() } label: { Label("Set Home", systemImage: "house") }
+                    .disabled(model.focus == nil)
+                    .help("Set the focused person as Home")
+            }
+        }
     }
 
     // MARK: Sidebar
 
     private var sidebar: some View {
-        List(sidebarItems, selection: $selectedSection) { item in
+        // Single-selection lists bind to an OPTIONAL; map it onto the non-optional model state.
+        let selection = Binding<SidebarSection?>(
+            get: { model.currentSection },
+            set: { if let section = $0 { model.currentSection = section } })
+
+        return List(sidebarItems, selection: selection) { item in
             Label(item.section.title, systemImage: item.section.systemImage)
                 .badge(item.badge ?? 0)         // 0 shows nothing meaningful; fine for count rows
                 .tag(item.section)
@@ -49,16 +68,14 @@ struct ShellView: View {
     // MARK: Content column
 
     @ViewBuilder private var content: some View {
-        switch selectedSection {
+        switch model.currentSection {
         case .people:
             PeopleListView(model: model)
-        case .none:
-            ContentUnavailableView("Pick a section", systemImage: "sidebar.left")
         default:
             // A5–A8 sections land later; show a friendly placeholder for now.
             ContentUnavailableView(
-                "\(selectedSection?.title ?? "") — coming soon",
-                systemImage: selectedSection?.systemImage ?? "hammer",
+                "\(model.currentSection.title) — coming soon",
+                systemImage: model.currentSection.systemImage,
                 description: Text("This section is part of a later milestone."))
         }
     }

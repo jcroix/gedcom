@@ -30,6 +30,8 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 720, minHeight: 480)
+        // Publish this window's model so app-level menu commands act on the focused window.
+        .focusedSceneValue(\.documentModel, model)
         // The File ▸ Open menu command broadcasts; the visible window responds by opening a panel.
         .onReceive(NotificationCenter.default.publisher(for: .openGedcomRequested)) { _ in
             presentOpenPanel()

@@ -39,6 +39,10 @@ public final class DocumentModel {
     /// The home person (root for charts, "Set Home" target). nil until chosen.
     public private(set) var homePerson: Xref?
 
+    /// The sidebar section currently shown in the content column. App/window state shared by the
+    /// sidebar selection and the View-menu section-jump commands (⌘1–⌘5).
+    public var currentSection: SidebarSection = .people
+
     public init() {}
 
     // MARK: Loaded-document accessors
@@ -82,6 +86,9 @@ public final class DocumentModel {
 
     /// Set the home person to the currently focused record (the "Set Home" command).
     public func setHomeToFocus() { homePerson = focus }
+
+    /// Navigate to the home person, if one is set (the "Go Home" command).
+    public func goHome() { if let homePerson { navigate(to: homePerson) } }
 
     // MARK: Loading
 
