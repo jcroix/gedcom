@@ -1,18 +1,20 @@
 //
 // FanChartView.swift — a fan ancestor chart, FamilySearch-styled (A8).
 //
-// ONE CONSISTENT TEXT RULE (after earlier inconsistency):
-//   * The center person (generation 0) is drawn HORIZONTALLY.
-//   * EVERY ancestor ring draws its name TANGENTIALLY — curved along the arc, glyph-by-glyph — and
-//     WRAPS onto multiple curved lines so long names fit instead of overflowing. There is no radial
-//     text and no per-generation switching, so orientation is uniform everywhere.
+// TEXT ORIENTATION RULE (exactly as FamilySearch does it):
+//   * Generation 0 (center person): HORIZONTAL.
+//   * Generations 1–2 (parents, grandparents): TANGENTIAL — curved along the arc, glyph-by-glyph
+//     (inner rings have long arcs, so curved text fits there).
+//   * Generation 3 and beyond: RADIAL — straight text reading outward along the spoke, multi-line
+//     (given / surname / dates), long parts truncated with "…" (outer rings are angularly narrow,
+//     so radial-outward text fits where curved wouldn't).
 //
-// Curved-glyph rotation is `glyphAngle + π/2`, which for this upward-opening half-fan reads
-// horizontally across the top and turns smoothly up the sides — never upside down.
+// Rendering is hybrid: a Canvas draws the wedge fills/outlines/colored arcs, the horizontal center
+// label, and the curved (gen 1–2) names. The radial (gen 3+) names are wrapping/truncating SwiftUI
+// Text overlays (rotated + positioned). Whole-wedge taps use a polar hit-test.
 //
-// Styling: white background, dark text, a refined 4-color lineage palette as a subtle wedge tint
-// plus a bold colored OUTER-RING arc; the center is neutral slate. Whole-wedge taps use a polar
-// hit-test. The fan is a half-fan (sweep π): root at bottom-center, ancestors sweeping the top.
+// The fan is a 270° sweep (set by the caller) centered at the top: root at bottom-center, ancestors
+// sweeping up and around, gap at the bottom — like FamilySearch.
 //
 
 import SwiftUI
@@ -23,19 +25,15 @@ struct FanChartView: View {
     let layout: FanLayout
     let model: DocumentModel
 
-    private let ringWidth: CGFloat = 104
+    private let ringWidth: CGFloat = 116
+    private let curvedMaxGeneration = 2          // gens 1–2 curved/tangential; 3+ radial
     private let lineageBuckets = 4
     private let nameSize: CGFloat = 10
     private let dateSize: CGFloat = 8
-    private let lineSpacing: CGFloat = 12          // radial px between wrapped lines
+    private let curvedLineSpacing: CGFloat = 12
 
     private var radius: CGFloat { CGFloat(layout.generations) * ringWidth }
-
-    /// Total angular sweep of the fan (read from the root wedge, which spans it all).
     private var sweep: Double { layout.wedges.first { $0.generation == 0 }.map { $0.endAngle - $0.startAngle } ?? .pi }
-
-    /// Center sits where the top of the fan is `radius` above it. For sweeps wider than 180° the fan
-    /// dips below the center on the sides, so the frame is taller than `radius`.
     private var center: CGPoint { CGPoint(x: radius, y: radius) }
     private var frameHeight: CGFloat { radius * CGFloat(max(1.0, 1.0 - cos(sweep / 2))) }
 
@@ -45,8 +43,13 @@ struct FanChartView: View {
             Canvas { context, _ in
                 for wedge in layout.wedges {
                     drawWedge(wedge, in: &context)
-                    drawNames(wedge, in: &context)
+                    if wedge.generation == 0 { drawCenterLabel(wedge, in: &context) }
+                    else if wedge.generation <= curvedMaxGeneration { drawCurvedNames(wedge, in: &context) }
                 }
+            }
+            // Radial (gen 3+) names as wrapping/truncating SwiftUI overlays.
+            ForEach(layout.wedges.filter { $0.generation > curvedMaxGeneration }) { wedge in
+                radialLabel(wedge).allowsHitTesting(false)
             }
         }
         .frame(width: radius * 2, height: frameHeight)
@@ -66,7 +69,6 @@ struct FanChartView: View {
         sector.addArc(center: center, radius: outer, startAngle: start, endAngle: end, clockwise: false)
         sector.addArc(center: center, radius: max(inner, 0.01), startAngle: end, endAngle: start, clockwise: true)
         sector.closeSubpath()
-
         context.fill(sector, with: .color(color.opacity(0.16)))
         context.stroke(sector, with: .color(Color(white: 0.80)), lineWidth: 1)
         if wedge.generation > 0 {
@@ -76,59 +78,38 @@ struct FanChartView: View {
         }
     }
 
-    // MARK: Names
+    // MARK: Center (horizontal)
 
-    private func drawNames(_ wedge: FanWedge, in context: inout GraphicsContext) {
+    private func drawCenterLabel(_ wedge: FanWedge, in context: inout GraphicsContext) {
         let person = model.document?.individuals[wedge.id]
         let name = person?.displayName ?? wedge.id.value
-        let dates = lifeYears(person)
+        let text = lifeYears(person).map { "\(name)\n\($0)" } ?? name
+        let point = CGPoint(x: center.x, y: center.y - Double(ringWidth) / 2)
+        context.draw(Text(text).font(.system(size: nameSize + 2, weight: .medium)).foregroundStyle(.black), at: point)
+    }
 
-        // Center person: horizontal, multi-line.
-        if wedge.generation == 0 {
-            let point = CGPoint(x: center.x, y: center.y - Double(ringWidth) / 2)
-            let text = (dates == nil) ? name : "\(name)\n\(dates!)"
-            context.draw(Text(text).font(.system(size: nameSize + 2, weight: .medium))
-                .foregroundStyle(.black), at: point)
-            return
-        }
+    // MARK: Curved (tangential, gen 3+)
 
-        // Ancestors: curved, wrapped, name lines then a date line, centered in the ring.
-        let inner = CGFloat(wedge.generation) * ringWidth
-        let midRadius = inner + ringWidth / 2
+    private func drawCurvedNames(_ wedge: FanWedge, in context: inout GraphicsContext) {
+        let person = model.document?.individuals[wedge.id]
+        let midRadius = CGFloat(wedge.generation) * ringWidth + ringWidth / 2
         let wedgeAngle = wedge.endAngle - wedge.startAngle
         let maxChars = max(4, Int(wedgeAngle * Double(midRadius) * 0.86 / (Double(nameSize) * 0.58)))
 
-        var lines = wrap(name, maxChars: maxChars)
-        if lines.count > 4 { lines = Array(lines.prefix(4)) }     // keep paragraphs sane
+        var lines = wrap(person?.displayName ?? wedge.id.value, maxChars: maxChars)
+        if lines.count > 3 { lines = Array(lines.prefix(3)) }
+        let dates = lifeYears(person)
         let total = CGFloat(lines.count) + (dates == nil ? 0 : 0.85)
-        var r = midRadius + (total - 1) / 2 * lineSpacing         // first (outer) line
-
+        var r = midRadius + (total - 1) / 2 * curvedLineSpacing
         for line in lines {
-            drawCurvedLine(line, in: &context, radius: r, midAngle: wedge.midAngle,
-                           size: nameSize, weight: .medium, color: .black)
-            r -= lineSpacing
+            drawCurvedLine(line, in: &context, radius: r, midAngle: wedge.midAngle, size: nameSize, weight: .medium, color: .black)
+            r -= curvedLineSpacing
         }
         if let dates {
-            drawCurvedLine(dates, in: &context, radius: r, midAngle: wedge.midAngle,
-                           size: dateSize, weight: .regular, color: Color(white: 0.45))
+            drawCurvedLine(dates, in: &context, radius: r, midAngle: wedge.midAngle, size: dateSize, weight: .regular, color: Color(white: 0.45))
         }
     }
 
-    /// Greedy word wrap to lines of at most `maxChars` characters (a single long word gets its own line).
-    private func wrap(_ text: String, maxChars: Int) -> [String] {
-        var lines: [String] = []
-        var current = ""
-        for word in text.split(separator: " ") {
-            if current.isEmpty { current = String(word) }
-            else if current.count + 1 + word.count <= maxChars { current += " " + word }
-            else { lines.append(current); current = String(word) }
-        }
-        if !current.isEmpty { lines.append(current) }
-        return lines.isEmpty ? [text] : lines
-    }
-
-    /// Draw one line of text along the arc at `radius`, centered on `midAngle`, glyph-by-glyph with
-    /// each rotated tangent (`angle + π/2` — readable across the top, turning up the sides).
     private func drawCurvedLine(_ text: String, in context: inout GraphicsContext, radius: CGFloat,
                                 midAngle: Double, size: CGFloat, weight: Font.Weight, color: Color) {
         let chars = Array(text)
@@ -146,7 +127,57 @@ struct FanChartView: View {
         }
     }
 
+    // MARK: Radial (gen 1–2) — wrapping/truncating SwiftUI text
+
+    private func radialLabel(_ wedge: FanWedge) -> some View {
+        let inner = CGFloat(wedge.generation) * ringWidth
+        let midRadius = inner + ringWidth / 2
+        let arcLength = CGFloat(wedge.endAngle - wedge.startAngle) * midRadius
+        let point = CGPoint(x: center.x + cos(wedge.midAngle) * Double(midRadius),
+                            y: center.y + sin(wedge.midAngle) * Double(midRadius))
+        return radialContent(wedge)
+            .frame(width: ringWidth * 0.86, height: max(arcLength * 0.9, 24))
+            .rotationEffect(.radians(radialRotation(wedge.midAngle)))
+            .position(point)
+    }
+
+    @ViewBuilder private func radialContent(_ wedge: FanWedge) -> some View {
+        let person = model.document?.individuals[wedge.id]
+        VStack(spacing: 0) {
+            if let given = person?.name?.given, let surname = person?.name?.surname {
+                Text(given).lineLimit(1).truncationMode(.tail)
+                Text(surname).lineLimit(1).truncationMode(.tail)
+            } else {
+                Text(person?.displayName ?? wedge.id.value).lineLimit(2).truncationMode(.tail)
+            }
+            if let dates = lifeYears(person) {
+                Text(dates).font(.system(size: dateSize)).foregroundStyle(.secondary)
+            }
+        }
+        .font(.system(size: nameSize, weight: .medium))
+        .foregroundStyle(.black)
+        .multilineTextAlignment(.center)
+    }
+
+    /// Radial rotation: reads OUTWARD on the right half; flips to upright (reading inward) on the
+    /// left half — the unavoidable mirror of radial fan text, same as FamilySearch.
+    private func radialRotation(_ theta: Double) -> Double { cos(theta) >= 0 ? theta : theta + .pi }
+
     // MARK: Helpers
+
+    /// Greedy word wrap; a single word longer than `maxChars` is truncated with "…".
+    private func wrap(_ text: String, maxChars: Int) -> [String] {
+        var lines: [String] = []
+        var current = ""
+        for raw in text.split(separator: " ") {
+            let word = raw.count > maxChars ? String(raw.prefix(max(1, maxChars - 1))) + "…" : String(raw)
+            if current.isEmpty { current = word }
+            else if current.count + 1 + word.count <= maxChars { current += " " + word }
+            else { lines.append(current); current = word }
+        }
+        if !current.isEmpty { lines.append(current) }
+        return lines.isEmpty ? [text] : lines
+    }
 
     private func lifeYears(_ person: Individual?) -> String? {
         let b = person?.birth?.date?.earliest?.year ?? person?.birth?.date?.latest?.year
@@ -160,12 +191,12 @@ struct FanChartView: View {
     }
 
     private func lineageColor(_ wedge: FanWedge) -> Color {
-        guard wedge.generation > 0 else { return Color(red: 0.42, green: 0.46, blue: 0.52) }  // slate
+        guard wedge.generation > 0 else { return Color(red: 0.42, green: 0.46, blue: 0.52) }
         let palette: [Color] = [
-            Color(red: 0.31, green: 0.48, blue: 0.65),   // muted blue
-            Color(red: 0.35, green: 0.63, blue: 0.49),   // sage green
-            Color(red: 0.84, green: 0.42, blue: 0.40),   // terracotta
-            Color(red: 0.90, green: 0.68, blue: 0.31),   // amber
+            Color(red: 0.31, green: 0.48, blue: 0.65),
+            Color(red: 0.35, green: 0.63, blue: 0.49),
+            Color(red: 0.84, green: 0.42, blue: 0.40),
+            Color(red: 0.90, green: 0.68, blue: 0.31),
         ]
         return palette[layout.lineageBucket(of: wedge, buckets: lineageBuckets) % palette.count]
     }
@@ -175,9 +206,7 @@ struct FanChartView: View {
         let ring = Int(hypot(dx, dy) / ringWidth)
         var angle = atan2(dy, dx)
         if angle < 0 { angle += 2 * .pi }
-        if let wedge = layout.wedges.first(where: {
-            $0.generation == ring && angle >= $0.startAngle && angle < $0.endAngle
-        }) {
+        if let wedge = layout.wedges.first(where: { $0.generation == ring && angle >= $0.startAngle && angle < $0.endAngle }) {
             model.navigate(to: wedge.id)
         }
     }
