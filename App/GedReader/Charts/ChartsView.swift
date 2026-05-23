@@ -25,13 +25,19 @@ struct ChartsView: View {
     @AppStorage("chartGenerations") private var generations = 4
     @State private var scale: CGFloat = 1
     @State private var chartBaseSize: CGSize = .zero   // measured natural size of the chart (scale 1)
-    // When set (by clicking/right-clicking a wedge), the chart re-roots on this person; nil = home.
+    // The person the chart is centered on. Seeded once on appear, then changed ONLY by an explicit
+    // re-center (right-click menu / Recenter button) — NOT by left-click selection, so clicking a
+    // wedge just shows that person's details without re-rooting the chart.
     @State private var chartRoot: Xref?
+    @State private var seededRoot: Xref?               // the initial/home root, for "Recenter on Home"
 
-    /// Chart root: an explicit re-center, else Home, else current focus, else the first person.
+    /// Chart root: the explicit center if seeded, else fall back (only matters for the first frame).
     private var root: Xref? {
         chartRoot ?? model.homePerson ?? model.focus ?? model.document?.allIndividuals.first?.id
     }
+
+    /// Where "Recenter on Home" jumps to: the Set-Home person if any, else the initial seed.
+    private var homeTarget: Xref? { model.homePerson ?? seededRoot }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,6 +46,9 @@ struct ChartsView: View {
             chartArea
         }
         .navigationTitle("Charts")
+        // Seed the chart root ONCE so it stays put when you left-click wedges (which only change
+        // the detail-pane focus). Re-centering is explicit (right-click menu / Recenter button).
+        .onAppear { if chartRoot == nil { chartRoot = root; seededRoot = root } }
         // Headless smoke-test hook (no effect in normal use): pick the chart type at launch.
         .task {
             if let raw = ProcessInfo.processInfo.environment["GEDREADER_AUTOCHART"],
@@ -59,9 +68,9 @@ struct ChartsView: View {
             Stepper("Generations: \(generations)", value: $generations, in: 3...8)
                 .fixedSize()
 
-            // Shown once the chart has been re-centered on someone else: jump back to the home root.
-            if chartRoot != nil {
-                Button { chartRoot = nil } label: { Label("Recenter on Home", systemImage: "house") }
+            // Shown once the chart has been re-centered away from home: jump back.
+            if chartRoot != nil, chartRoot != homeTarget {
+                Button { chartRoot = homeTarget } label: { Label("Recenter on Home", systemImage: "house") }
             }
 
             Spacer()

@@ -82,8 +82,6 @@ struct FanChartView: View {
                 Button("Center Fan Here") { onPickChart(id, .fan) }
                 Button("Pedigree From Here") { onPickChart(id, .pedigree) }
                 Button("Descendants From Here") { onPickChart(id, .descendant) }
-                Divider()
-                Button("Show Details") { onSelect(id) }
             }
         }
     }
