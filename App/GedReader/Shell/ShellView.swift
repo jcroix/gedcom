@@ -75,6 +75,8 @@ struct ShellView: View {
             FamiliesListView(model: model)
         case .quality:
             QualityView(model: model)
+        case .relationships:
+            RelationshipView(model: model)
         default:
             // A5–A8 sections land later; show a friendly placeholder for now.
             ContentUnavailableView(
